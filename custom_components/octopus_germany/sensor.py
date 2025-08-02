@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN
 
@@ -162,6 +163,16 @@ class OctopusElectricityPriceSensor(CoordinatorEntity, SensorEntity):
 
         # Initialize attributes right after creation
         self._update_attributes()
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the account."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"account_{self._account_number}")},
+            name=f"Octopus Account {self._account_number}",
+            manufacturer="Octopus Energy",
+            model="Octopus Germany Account",
+        )
 
     def _parse_time(self, time_str: str) -> time:
         """Parse time string in HH:MM:SS format to time object."""
@@ -523,6 +534,16 @@ class OctopusGasPriceSensor(CoordinatorEntity, SensorEntity):
         # Initialize attributes right after creation
         self._update_attributes()
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the account."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"account_{self._account_number}")},
+            name=f"Octopus Account {self._account_number}",
+            manufacturer="Octopus Energy",
+            model="Octopus Germany Account",
+        )
+
     def _parse_time(self, time_str: str) -> time:
         """Parse time string in HH:MM:SS format to time object."""
         try:
@@ -882,6 +903,16 @@ class OctopusElectricityBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_has_entity_name = False
 
     @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the account."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"account_{self._account_number}")},
+            name=f"Octopus Account {self._account_number}",
+            manufacturer="Octopus Energy",
+            model="Octopus Germany Account",
+        )
+
+    @property
     def native_value(self) -> float:
         """Return the electricity balance."""
         if (
@@ -919,6 +950,16 @@ class OctopusGasBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = "€"
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_has_entity_name = False
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the account."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"account_{self._account_number}")},
+            name=f"Octopus Account {self._account_number}",
+            manufacturer="Octopus Energy",
+            model="Octopus Germany Account",
+        )
 
     @property
     def native_value(self) -> float:
@@ -999,6 +1040,30 @@ class OctopusElectricityConsumptionSensor(CoordinatorEntity, SensorEntity):
         self._attr_has_entity_name = False
 
     @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the electricity meter."""
+        if (
+            not self.coordinator.data
+            or not isinstance(self.coordinator.data, dict)
+            or self._account_number not in self.coordinator.data
+        ):
+            return None
+
+        account_data = self.coordinator.data[self._account_number]
+        meter = account_data.get("meter", {})
+        meter_id = meter.get("id", "unknown")
+        meter_number = meter.get("number", "unknown")
+        meter_type = meter.get("meterType", "Electricity Meter")
+        
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"electricity_meter_{self._account_number}_{meter_id}")},
+            name=f"Electricity Meter {meter_number}",
+            manufacturer="Octopus Energy",
+            model=meter_type,
+            via_device=(DOMAIN, f"account_{self._account_number}"),
+        )
+
+    @property
     def native_value(self) -> float:
         """Return the electricity consumption for the current year."""
         if (
@@ -1068,6 +1133,30 @@ class OctopusGasConsumptionSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = "kWh"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_has_entity_name = False
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the gas meter."""
+        if (
+            not self.coordinator.data
+            or not isinstance(self.coordinator.data, dict)
+            or self._account_number not in self.coordinator.data
+        ):
+            return None
+
+        account_data = self.coordinator.data[self._account_number]
+        gas_meter = account_data.get("gas_meter", {})
+        meter_id = gas_meter.get("id", "unknown")
+        meter_number = gas_meter.get("number", "unknown")
+        meter_type = gas_meter.get("meterType", "Gas Meter")
+        
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"gas_meter_{self._account_number}_{meter_id}")},
+            name=f"Gas Meter {meter_number}",
+            manufacturer="Octopus Energy",
+            model=meter_type,
+            via_device=(DOMAIN, f"account_{self._account_number}"),
+        )
 
     @property
     def native_value(self) -> float:

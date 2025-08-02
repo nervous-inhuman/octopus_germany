@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.util.dt import as_local, as_utc, parse_datetime, utcnow
 
 from .const import DOMAIN
@@ -90,6 +91,16 @@ class OctopusIntelligentDispatchingBinarySensor(CoordinatorEntity, BinarySensorE
 
         # Initialize attributes right after creation
         self._update_attributes()
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the account."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"account_{self._account_number}")},
+            name=f"Octopus Account {self._account_number}",
+            manufacturer="Octopus Energy",
+            model="Octopus Germany Account",
+        )
 
     @property
     def is_on(self) -> bool:

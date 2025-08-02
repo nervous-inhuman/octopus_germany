@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN, UPDATE_INTERVAL
 
@@ -105,6 +106,21 @@ class OctopusSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_name = f"Octopus {self._account_number} Device Smart Control"
         self._attr_unique_id = f"octopus_{self._account_number}_device_smart_control"
         self._update_attributes()
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information for the vehicle/device."""
+        device = self._get_device()
+        device_name = device.get("name", "Unknown Device") if device else "Unknown Device"
+        device_model = device.get("vehicleVariant", {}).get("model", "Unknown Model") if device else "Unknown Model"
+        
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"vehicle_{self._device_id}")},
+            name=f"Vehicle {device_name}",
+            manufacturer="Vehicle Manufacturer",  # Could be extracted from device data if available
+            model=device_model,
+            via_device=(DOMAIN, f"account_{self._account_number}"),
+        )
 
     def _update_attributes(self):
         """Update device attributes based on the latest data."""
