@@ -88,6 +88,61 @@ query ComprehensiveDataQuery($accountNumber: String!) {
         }
         referenceConsumption
       }
+      gasMalos {
+        agreements {
+          product {
+            code
+            description
+            fullName
+          }
+          unitRateGrossRateInformation {
+            grossRate
+          }
+          unitRateInformation {
+            ... on SimpleProductUnitRateInformation {
+              __typename
+              grossRateInformation {
+                date
+                grossRate
+                rateValidToDate
+                vatRate
+              }
+              latestGrossUnitRateCentsPerKwh
+              netUnitRateCentsPerKwh
+            }
+            ... on TimeOfUseProductUnitRateInformation {
+              __typename
+              rates {
+                grossRateInformation {
+                  date
+                  grossRate
+                  rateValidToDate
+                  vatRate
+                }
+                latestGrossUnitRateCentsPerKwh
+                netUnitRateCentsPerKwh
+                timeslotActivationRules {
+                  activeFromTime
+                  activeToTime
+                }
+                timeslotName
+              }
+            }
+          }
+          validFrom
+          validTo
+        }
+        maloNumber
+        meloNumber
+        meter {
+          id
+          meterType
+          number
+          shouldReceiveSmartMeterData
+          submitMeterReadingUrl
+        }
+        referenceConsumption
+      }
     }
   }
   completedDispatches(accountNumber: $accountNumber) {
@@ -153,6 +208,60 @@ query ComprehensiveDataQuery($accountNumber: String!) {
     }
     start
     startDt
+  }
+}
+"""
+
+# Meter readings queries - requires account number and meter IDs
+ELECTRICITY_METER_READINGS_QUERY = """
+query getMeterReadingsElectricity($accountNumber: String!, $meterId: ID!, $cursor: String, $first: Int = 10) {
+  electricityMeterReadings(
+    accountNumber: $accountNumber
+    meterId: $meterId
+    first: $first
+    after: $cursor
+  ) {
+    edges {
+      node {
+        readAt
+        value
+        registerObisCode
+        typeOfRead
+        registerType
+        origin
+        meterId
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+"""
+
+GAS_METER_READINGS_QUERY = """
+query getMeterReadingsGas($accountNumber: String!, $meterId: ID!, $cursor: String, $first: Int = 10) {
+  gasMeterReadings(
+    accountNumber: $accountNumber
+    meterId: $meterId
+    first: $first
+    after: $cursor
+  ) {
+    edges {
+      node {
+        readAt
+        value
+        registerObisCode
+        typeOfRead
+        origin
+        meterId
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
   }
 }
 """
@@ -511,6 +620,109 @@ class OctopusGermany:
         """Fetch accounts data."""
         return await self.fetch_accounts_with_initial_data()
 
+    async def fetch_meter_readings(self, account_number: str, electricity_meter_id: str = None, gas_meter_id: str = None, first: int = 100):
+        """Fetch meter readings for electricity and/or gas meters.
+        
+        Args:
+            account_number: The account number (required)
+            electricity_meter_id: ID of the electricity meter (optional)
+            gas_meter_id: ID of the gas meter (optional)
+            first: Number of readings to fetch (default: 100)
+            
+        Returns:
+            Dict containing meter readings data or None if error
+        """
+        if not electricity_meter_id and not gas_meter_id:
+            _LOGGER.warning("No meter IDs provided for meter readings query")
+            return None
+            
+        if not await self.ensure_token():
+            _LOGGER.error("Failed to ensure valid token for fetch_meter_readings")
+            return None
+
+        client = self._get_graphql_client()
+        result = {
+            "electricityMeterReadings": [],
+            "gasMeterReadings": []
+        }
+
+        try:
+            # Fetch electricity meter readings if meter ID provided
+            if electricity_meter_id:
+                variables = {
+                    "accountNumber": account_number,
+                    "meterId": electricity_meter_id,
+                    "first": first,
+                    "cursor": None
+                }
+                
+                _LOGGER.debug("Fetching electricity meter readings with variables: %s", variables)
+                response = await client.execute_async(
+                    query=ELECTRICITY_METER_READINGS_QUERY, variables=variables
+                )
+
+                from .const import LOG_API_RESPONSES
+                if LOG_API_RESPONSES:
+                    _LOGGER.info("Electricity meter readings API Response: %s", json.dumps(response, indent=2))
+
+                if "errors" in response:
+                    error = response.get("errors", [{}])[0]
+                    error_code = error.get("extensions", {}).get("errorCode")
+
+                    if error_code == "KT-CT-1124":  # JWT expired
+                        _LOGGER.warning("Token expired during electricity meter readings fetch, refreshing...")
+                        self._token_manager.clear()
+                        success = await self.login()
+                        if success:
+                            return await self.fetch_meter_readings(account_number, electricity_meter_id, gas_meter_id, first)
+
+                    _LOGGER.error("API returned errors for electricity meter readings: %s", response["errors"])
+                else:
+                    if "data" in response and "electricityMeterReadings" in response["data"]:
+                        result["electricityMeterReadings"] = response["data"]["electricityMeterReadings"]
+                        _LOGGER.debug("Successfully fetched electricity meter readings")
+
+            # Fetch gas meter readings if meter ID provided
+            if gas_meter_id:
+                variables = {
+                    "accountNumber": account_number,
+                    "meterId": gas_meter_id,
+                    "first": first,
+                    "cursor": None
+                }
+                
+                _LOGGER.debug("Fetching gas meter readings with variables: %s", variables)
+                response = await client.execute_async(
+                    query=GAS_METER_READINGS_QUERY, variables=variables
+                )
+
+                from .const import LOG_API_RESPONSES
+                if LOG_API_RESPONSES:
+                    _LOGGER.info("Gas meter readings API Response: %s", json.dumps(response, indent=2))
+
+                if "errors" in response:
+                    error = response.get("errors", [{}])[0]
+                    error_code = error.get("extensions", {}).get("errorCode")
+
+                    if error_code == "KT-CT-1124":  # JWT expired
+                        _LOGGER.warning("Token expired during gas meter readings fetch, refreshing...")
+                        self._token_manager.clear()
+                        success = await self.login()
+                        if success:
+                            return await self.fetch_meter_readings(account_number, electricity_meter_id, gas_meter_id, first)
+
+                    _LOGGER.error("API returned errors for gas meter readings: %s", response["errors"])
+                else:
+                    if "data" in response and "gasMeterReadings" in response["data"]:
+                        result["gasMeterReadings"] = response["data"]["gasMeterReadings"]
+                        _LOGGER.debug("Successfully fetched gas meter readings")
+
+            return result
+
+        except Exception as e:
+            _LOGGER.error("Error fetching meter readings: %s", e)
+            return None
+
     # Comprehensive data fetch in a single query
     async def fetch_all_data(self, account_number: str):
         """Fetch all data for an account including devices, dispatches and account details.
@@ -556,6 +768,10 @@ class OctopusGermany:
                 "completedDispatches": [],
                 "devices": [],
                 "plannedDispatches": [],
+                "meterReadings": {
+                    "electricityMeterReadings": [],
+                    "gasMeterReadings": []
+                },
             }
 
             # Now check for partial data availability - we'll continue even if there are some errors
@@ -659,6 +875,47 @@ class OctopusGermany:
                                 if success:
                                     # Retry with new token
                                     return await self.fetch_all_data(account_number)
+
+                # Try to fetch meter readings if we have meter IDs
+                try:
+                    electricity_meter_id = None
+                    gas_meter_id = None
+                    
+                    # Extract meter IDs from account data
+                    if result["account"] and "allProperties" in result["account"]:
+                        for property_data in result["account"]["allProperties"]:
+                            # Check for electricity meter ID
+                            if "electricityMalos" in property_data:
+                                for malo in property_data["electricityMalos"]:
+                                    if "meter" in malo and malo["meter"] and "id" in malo["meter"]:
+                                        electricity_meter_id = malo["meter"]["id"]
+                                        break
+                            
+                            # Check for gas meter ID
+                            if "gasMalos" in property_data:
+                                for malo in property_data["gasMalos"]:
+                                    if "meter" in malo and malo["meter"] and "id" in malo["meter"]:
+                                        gas_meter_id = malo["meter"]["id"]
+                                        break
+                    
+                    # Fetch meter readings if we have meter IDs
+                    if electricity_meter_id or gas_meter_id:
+                        _LOGGER.debug("Fetching meter readings for electricity_meter_id=%s, gas_meter_id=%s", 
+                                     electricity_meter_id, gas_meter_id)
+                        meter_readings = await self.fetch_meter_readings(account_number, electricity_meter_id, gas_meter_id)
+                        
+                        if meter_readings:
+                            result["meterReadings"]["electricityMeterReadings"] = meter_readings.get("electricityMeterReadings", [])
+                            result["meterReadings"]["gasMeterReadings"] = meter_readings.get("gasMeterReadings", [])
+                            _LOGGER.debug("Successfully fetched meter readings")
+                        else:
+                            _LOGGER.warning("Failed to fetch meter readings")
+                    else:
+                        _LOGGER.debug("No meter IDs found in account data")
+                        
+                except Exception as meter_error:
+                    _LOGGER.warning("Error fetching meter readings: %s", meter_error)
+                    # Don't fail the whole request if meter readings fail
 
                 return result
             elif "errors" in response:

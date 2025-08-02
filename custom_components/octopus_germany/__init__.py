@@ -213,6 +213,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "property_ids": [],
                 "devices": [],
                 "products": [],
+                "gas_products": [],
                 "vehicle_battery_size_in_kwh": None,
                 "current_start": None,
                 "current_end": None,
@@ -222,6 +223,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "malo_number": None,
                 "melo_number": None,
                 "meter": None,
+                "gas_meter": None,
+                "electricity_meter_readings": [],
+                "gas_meter_readings": [],
+                "electricity_latest_reading": 0.0,
+                "electricity_consumption": 0.0,
+                "electricity_yearly_consumption": 0.0,
+                "gas_latest_reading": 0.0,
+                "gas_consumption": 0.0,
+                "gas_yearly_consumption": 0.0,
             }
         }
 
@@ -322,6 +332,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if meter:
                 break
         result_data[account_number]["meter"] = meter
+
+        # Get gas meter data
+        gas_meter = None
+        for prop in account_data.get("allProperties", []):
+            for gas_malo in prop.get("gasMalos", []):
+                if gas_malo.get("meter"):
+                    gas_meter = gas_malo.get("meter")
+                    break
+            if gas_meter:
+                break
+        result_data[account_number]["gas_meter"] = gas_meter
 
         # Extract property IDs
         property_ids = [
@@ -604,21 +625,289 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     product.get("grossRate"),
                 )
         else:
-            _LOGGER.warning("No products found for account %s", account_number)
-            # Add a test product so we at least get a sensor for testing
-            products.append(
-                {
-                    "code": "TEST_PRODUCT",
-                    "description": "Test Product for debugging",
-                    "name": "Test Product",
-                    "grossRate": "30",  # 30 cents as a reasonable default
-                    "type": "Simple",
-                    "validFrom": None,
-                    "validTo": None,
-                }
-            )
+            _LOGGER.debug("No electricity products found for account %s", account_number)
 
         result_data[account_number]["products"] = products
+
+        # Extract gas products - similar logic to electricity products
+        gas_products = []
+        
+        # Process gas MALOs for gas products
+        for prop in account_data.get("allProperties", []):
+            for gas_malo in prop.get("gasMalos", []):
+                for agreement in gas_malo.get("agreements", []):
+                    product = agreement.get("product", {})
+                    unit_rate_info = agreement.get("unitRateInformation", {})
+
+                    # Log what fields are available to help debug
+                    if unit_rate_info:
+                        _LOGGER.debug(
+                            "Gas unit rate info keys: %s", list(unit_rate_info.keys())
+                        )
+
+                    # Determine the product type
+                    product_type = "Simple"
+                    if "__typename" in unit_rate_info:
+                        product_type = (
+                            "Simple"
+                            if unit_rate_info["__typename"]
+                            == "SimpleProductUnitRateInformation"
+                            else "TimeOfUse"
+                        )
+
+                    # For Simple gas product types
+                    if product_type == "Simple":
+                        # Get the gross rate from various possible sources
+                        gross_rate = "0"
+
+                        # Check different possible sources for gross rate
+                        if "grossRateInformation" in unit_rate_info:
+                            if isinstance(
+                                unit_rate_info["grossRateInformation"], dict
+                            ):
+                                gross_rate = unit_rate_info[
+                                    "grossRateInformation"
+                                ].get("grossRate", "0")
+                            elif (
+                                isinstance(
+                                    unit_rate_info["grossRateInformation"], list
+                                )
+                                and unit_rate_info["grossRateInformation"]
+                            ):
+                                gross_rate = (
+                                    unit_rate_info["grossRateInformation"][0].get(
+                                        "grossRate", "0"
+                                    )
+                                    if unit_rate_info["grossRateInformation"]
+                                    else "0"
+                                )
+                        elif "latestGrossUnitRateCentsPerKwh" in unit_rate_info:
+                            gross_rate = unit_rate_info[
+                                "latestGrossUnitRateCentsPerKwh"
+                            ]
+                        elif "unitRateGrossRateInformation" in agreement:
+                            if isinstance(
+                                agreement["unitRateGrossRateInformation"], dict
+                            ):
+                                gross_rate = agreement[
+                                    "unitRateGrossRateInformation"
+                                ].get("grossRate", "0")
+                            elif (
+                                isinstance(
+                                    agreement["unitRateGrossRateInformation"], list
+                                )
+                                and agreement["unitRateGrossRateInformation"]
+                            ):
+                                gross_rate = (
+                                    agreement["unitRateGrossRateInformation"][
+                                        0
+                                    ].get("grossRate", "0")
+                                    if agreement["unitRateGrossRateInformation"]
+                                    else "0"
+                                )
+
+                        gas_products.append(
+                            {
+                                "code": product.get("code", "Unknown"),
+                                "description": product.get("description", ""),
+                                "name": product.get("fullName", "Unknown"),
+                                "grossRate": gross_rate,
+                                "type": product_type,
+                                "validFrom": agreement.get("validFrom"),
+                                "validTo": agreement.get("validTo"),
+                            }
+                        )
+
+                    # For TimeOfUse gas product types
+                    elif product_type == "TimeOfUse" and "rates" in unit_rate_info:
+                        # Process time-of-use rates for gas
+                        timeslots = []
+
+                        for rate in unit_rate_info["rates"]:
+                            gross_rate = "0"
+
+                            # Extract the gross rate
+                            if (
+                                "grossRateInformation" in rate
+                                and rate["grossRateInformation"]
+                            ):
+                                if isinstance(rate["grossRateInformation"], dict):
+                                    gross_rate = rate["grossRateInformation"].get(
+                                        "grossRate", "0"
+                                    )
+                                elif (
+                                    isinstance(rate["grossRateInformation"], list)
+                                    and rate["grossRateInformation"]
+                                ):
+                                    gross_rate = rate["grossRateInformation"][
+                                        0
+                                    ].get("grossRate", "0")
+                            elif "latestGrossUnitRateCentsPerKwh" in rate:
+                                gross_rate = rate["latestGrossUnitRateCentsPerKwh"]
+
+                            # Create activation rules
+                            activation_rules = []
+                            if "timeslotActivationRules" in rate and isinstance(
+                                rate["timeslotActivationRules"], list
+                            ):
+                                for rule in rate["timeslotActivationRules"]:
+                                    activation_rules.append(
+                                        {
+                                            "from_time": rule.get(
+                                                "activeFromTime", "00:00:00"
+                                            ),
+                                            "to_time": rule.get(
+                                                "activeToTime", "00:00:00"
+                                            ),
+                                        }
+                                    )
+
+                            # Add timeslot data
+                            timeslots.append(
+                                {
+                                    "name": rate.get("timeslotName", "Unknown"),
+                                    "rate": gross_rate,
+                                    "activation_rules": activation_rules,
+                                }
+                            )
+
+                        # Create a TimeOfUse gas product with timeslots
+                        gas_products.append(
+                            {
+                                "code": product.get("code", "Unknown"),
+                                "description": product.get("description", ""),
+                                "name": product.get("fullName", "Unknown"),
+                                "type": product_type,
+                                "validFrom": agreement.get("validFrom"),
+                                "validTo": agreement.get("validTo"),
+                                "timeslots": timeslots,
+                            }
+                        )
+
+                        _LOGGER.debug(
+                            "Found gas TimeOfUse product with %d timeslots: %s",
+                            len(timeslots),
+                            [ts.get("name") for ts in timeslots],
+                        )
+
+        # Log gas products found
+        if gas_products:
+            _LOGGER.debug(
+                "Found %d gas products for account %s", len(gas_products), account_number
+            )
+            for idx, product in enumerate(gas_products):
+                _LOGGER.debug(
+                    "Gas Product %d: code=%s, grossRate=%s",
+                    idx + 1,
+                    product.get("code"),
+                    product.get("grossRate"),
+                )
+        else:
+            _LOGGER.debug("No gas products found for account %s", account_number)
+
+        result_data[account_number]["gas_products"] = gas_products
+
+        # Process electricity meter readings
+        meter_readings_data = data.get("meterReadings", {})
+        electricity_readings = meter_readings_data.get("electricityMeterReadings", {})
+        electricity_meter_readings = []
+        if electricity_readings and "edges" in electricity_readings:
+            for edge in electricity_readings["edges"]:
+                node = edge.get("node", {})
+                if node:
+                    electricity_meter_readings.append({
+                        "readAt": node.get("readAt"),
+                        "value": float(node.get("value", "0")) if node.get("value") else 0.0,
+                        "registerObisCode": node.get("registerObisCode"),
+                        "typeOfRead": node.get("typeOfRead"),
+                        "registerType": node.get("registerType"),
+                        "origin": node.get("origin"),
+                        "meterId": node.get("meterId")
+                    })
+        
+        result_data[account_number]["electricity_meter_readings"] = electricity_meter_readings
+
+        # Process gas meter readings
+        gas_readings = meter_readings_data.get("gasMeterReadings", {})
+        gas_meter_readings = []
+        if gas_readings and "edges" in gas_readings:
+            for edge in gas_readings["edges"]:
+                node = edge.get("node", {})
+                if node:
+                    gas_meter_readings.append({
+                        "readAt": node.get("readAt"),
+                        "value": float(node.get("value", "0")) if node.get("value") else 0.0,
+                        "registerObisCode": node.get("registerObisCode"),
+                        "typeOfRead": node.get("typeOfRead"),
+                        "origin": node.get("origin"),
+                        "meterId": node.get("meterId")
+                    })
+        
+        result_data[account_number]["gas_meter_readings"] = gas_meter_readings
+
+        # Calculate latest consumption values if we have readings
+        if electricity_meter_readings and len(electricity_meter_readings) >= 2:
+            # Sort by readAt date (newest first)
+            sorted_readings = sorted(electricity_meter_readings, key=lambda x: x.get("readAt", ""), reverse=True)
+            latest_reading = sorted_readings[0]["value"]
+            previous_reading = sorted_readings[1]["value"]
+            result_data[account_number]["electricity_latest_reading"] = latest_reading
+            result_data[account_number]["electricity_consumption"] = max(0, latest_reading - previous_reading)
+            
+            # Calculate yearly consumption (from oldest to newest reading this year)
+            from datetime import datetime
+            current_year = datetime.now().year
+            yearly_readings = [r for r in sorted_readings if r.get("readAt", "").startswith(str(current_year))]
+            
+            if len(yearly_readings) >= 2:
+                # Sort yearly readings by date (oldest first for yearly calculation)
+                yearly_sorted = sorted(yearly_readings, key=lambda x: x.get("readAt", ""))
+                oldest_this_year = yearly_sorted[0]["value"]
+                newest_this_year = yearly_sorted[-1]["value"]
+                result_data[account_number]["electricity_yearly_consumption"] = max(0, newest_this_year - oldest_this_year)
+            else:
+                result_data[account_number]["electricity_yearly_consumption"] = 0.0
+        else:
+            result_data[account_number]["electricity_latest_reading"] = 0.0
+            result_data[account_number]["electricity_consumption"] = 0.0
+            result_data[account_number]["electricity_yearly_consumption"] = 0.0
+
+        if gas_meter_readings and len(gas_meter_readings) >= 2:
+            # Sort by readAt date (newest first)
+            sorted_readings = sorted(gas_meter_readings, key=lambda x: x.get("readAt", ""), reverse=True)
+            latest_reading = sorted_readings[0]["value"]
+            previous_reading = sorted_readings[1]["value"]
+            result_data[account_number]["gas_latest_reading"] = latest_reading
+            gas_period_m3 = max(0, latest_reading - previous_reading)
+            # Convert from m³ to kWh using factor 10
+            result_data[account_number]["gas_consumption"] = gas_period_m3 * 10.0
+            
+            # Calculate yearly consumption (from oldest to newest reading this year)
+            from datetime import datetime
+            current_year = datetime.now().year
+            yearly_readings = [r for r in sorted_readings if r.get("readAt", "").startswith(str(current_year))]
+            
+            if len(yearly_readings) >= 2:
+                # Sort yearly readings by date (oldest first for yearly calculation)
+                yearly_sorted = sorted(yearly_readings, key=lambda x: x.get("readAt", ""))
+                oldest_this_year = yearly_sorted[0]["value"]
+                newest_this_year = yearly_sorted[-1]["value"]
+                gas_yearly_m3 = max(0, newest_this_year - oldest_this_year)
+                # Convert from m³ to kWh using factor 10
+                result_data[account_number]["gas_yearly_consumption"] = gas_yearly_m3 * 10.0
+            else:
+                result_data[account_number]["gas_yearly_consumption"] = 0.0
+        else:
+            result_data[account_number]["gas_latest_reading"] = 0.0
+            result_data[account_number]["gas_consumption"] = 0.0
+            result_data[account_number]["gas_yearly_consumption"] = 0.0
+
+        _LOGGER.debug(
+            "Processed meter readings for account %s: electricity=%d readings, gas=%d readings",
+            account_number,
+            len(electricity_meter_readings),
+            len(gas_meter_readings)
+        )
 
         return result_data
 
