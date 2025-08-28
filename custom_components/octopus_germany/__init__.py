@@ -26,7 +26,7 @@ import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH]
 
 API_URL = "https://api.octopus.energy/v1/graphql/"
 
@@ -208,17 +208,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             account_number: {
                 "account_number": account_number,
                 "electricity_balance": 0,
-                "planned_dispatches": [],
-                "completed_dispatches": [],
                 "property_ids": [],
                 "devices": [],
                 "products": [],
                 "gas_products": [],
                 "vehicle_battery_size_in_kwh": None,
-                "current_start": None,
-                "current_end": None,
-                "next_start": None,
-                "next_end": None,
                 "ledgers": [],
                 "malo_number": None,
                 "melo_number": None,
@@ -370,51 +364,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         result_data[account_number]["vehicle_battery_size_in_kwh"] = (
             vehicle_battery_size
         )
-
-        # Handle dispatch data if it exists
-        planned_dispatches = data.get("plannedDispatches", [])
-        if planned_dispatches is None:  # Handle explicit None value (from API error)
-            planned_dispatches = []
-        result_data[account_number]["planned_dispatches"] = planned_dispatches
-
-        completed_dispatches = data.get("completedDispatches", [])
-        if completed_dispatches is None:  # Handle explicit None value (from API error)
-            completed_dispatches = []
-        result_data[account_number]["completed_dispatches"] = completed_dispatches
-
-        # Calculate current and next dispatches
-        now = utcnow()  # Use timezone-aware UTC now
-        current_start = None
-        current_end = None
-        next_start = None
-        next_end = None
-
-        for dispatch in sorted(planned_dispatches, key=lambda x: x.get("start", "")):
-            try:
-                # Convert string to timezone-aware datetime objects
-                start_str = dispatch.get("start")
-                end_str = dispatch.get("end")
-
-                if not start_str or not end_str:
-                    continue
-
-                # Parse string to datetime and ensure it's UTC timezone-aware
-                start = as_utc(parse_datetime(start_str))
-                end = as_utc(parse_datetime(end_str))
-
-                if start <= now <= end:
-                    current_start = start
-                    current_end = end
-                elif now < start and not next_start:
-                    next_start = start
-                    next_end = end
-            except (ValueError, TypeError) as e:
-                _LOGGER.error("Error parsing dispatch dates: %s - %s", dispatch, str(e))
-
-        result_data[account_number]["current_start"] = current_start
-        result_data[account_number]["current_end"] = current_end
-        result_data[account_number]["next_start"] = next_start
-        result_data[account_number]["next_end"] = next_end
 
         # Extract products - ensure we always have product data
         products = []
@@ -929,17 +878,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             primary_account_number,
             list(coordinator.data[primary_account_number].keys()),
         )
-        if "plannedDispatches" in coordinator.data[primary_account_number]:
-            _LOGGER.info(
-                "Found %d planned dispatches",
-                len(coordinator.data[primary_account_number]["plannedDispatches"]),
-            )
-            _LOGGER.info(
-                "First planned dispatch: %s",
-                coordinator.data[primary_account_number]["plannedDispatches"][0]
-                if coordinator.data[primary_account_number]["plannedDispatches"]
-                else "None",
-            )
 
     # Store API, account number and coordinator in hass.data
     hass.data[DOMAIN][entry.entry_id] = {

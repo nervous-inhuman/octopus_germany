@@ -26,7 +26,6 @@ If you find this useful and are planning on moving to Octopus Energy Germany, wh
   - Heat tariffs (for heat pumps)
 - Device smart control (suspend/unsuspend charging)
 - Electric vehicle charging preferences management
-- Intelligent dispatching status tracking
 
 ## Installation
 
@@ -70,27 +69,6 @@ The integration is configured via the Home Assistant UI:
   - `type`: Product type (Simple or TimeOfUse)
   - `valid_from`: Start date of validity
   - `valid_to`: End date of validity
-
-#### Intelligent Dispatching Binary Sensor
-
-- **Entity ID**: `binary_sensor.octopus_<account_number>_intelligent_dispatching`
-- **Description**: Shows whether intelligent dispatching (smart charging) is currently active
-- **State**: `on` when a dispatch is active, `off` otherwise
-- **Attributes**:
-  - `account_number`: Your Octopus Energy account number
-  - `electricity_balance`: Your current account balance in EUR
-  - `planned_dispatches`: List of upcoming charging sessions
-  - `completed_dispatches`: List of past charging sessions
-  - `provider`: Your energy provider
-  - `vehicle_battery_size_in_kwh`: Size of your vehicle's battery (if available)
-  - `current_start`: Start time of the current dispatch
-  - `current_end`: End time of the current dispatch
-  - `devices`: List of connected devices
-  - `products`: Details about your energy products
-  - `malo_number`: Your electricity meter point number
-  - `melo_number`: Your electricity meter number
-  - `meter`: Information about your meter
-  - `current_state`: Current state of your smart charging device
 
 ### Switches
 
