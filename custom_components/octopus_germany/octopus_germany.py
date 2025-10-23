@@ -145,18 +145,6 @@ query ComprehensiveDataQuery($accountNumber: String!) {
       }
     }
   }
-  completedDispatches(accountNumber: $accountNumber) {
-    delta
-    deltaKwh
-    end
-    endDt
-    meta {
-      location
-      source
-    }
-    start
-    startDt
-  }
   devices(accountNumber: $accountNumber) {
     status {
       current
@@ -196,18 +184,6 @@ query ComprehensiveDataQuery($accountNumber: String!) {
         batterySize
       }
     }
-  }
-  plannedDispatches(accountNumber: $accountNumber) {
-    delta
-    deltaKwh
-    end
-    endDt
-    meta {
-      location
-      source
-    }
-    start
-    startDt
   }
 }
 """
@@ -765,9 +741,7 @@ class OctopusGermany:
             result = {
                 "account": {},
                 "products": [],  # This will stay empty as we removed the property field
-                "completedDispatches": [],
                 "devices": [],
-                "plannedDispatches": [],
                 "meterReadings": {
                     "electricityMeterReadings": [],
                     "gasMeterReadings": []
@@ -820,30 +794,15 @@ class OctopusGermany:
                         data["devices"] if data["devices"] is not None else []
                     )
 
-                if "completedDispatches" in data:
-                    result["completedDispatches"] = (
-                        data["completedDispatches"]
-                        if data["completedDispatches"] is not None
-                        else []
-                    )
-
-                if "plannedDispatches" in data:
-                    result["plannedDispatches"] = (
-                        data["plannedDispatches"]
-                        if data["plannedDispatches"] is not None
-                        else []
-                    )
-
                 # Only log errors but don't fail the whole request if we got at least account data
                 if "errors" in response and result["account"]:
-                    # Filter only the errors that are about missing devices or dispatches
+                    # Filter only the errors that are about missing devices
                     non_critical_errors = [
                         error
                         for error in response["errors"]
                         if (
                             error.get("path", [])
-                            and error.get("path")[0]
-                            in ["completedDispatches", "plannedDispatches", "devices"]
+                            and error.get("path")[0] in ["devices"]
                             and error.get("extensions", {}).get("errorCode")
                             == "KT-CT-4301"
                         )
@@ -858,7 +817,7 @@ class OctopusGermany:
 
                     if non_critical_errors:
                         _LOGGER.warning(
-                            "API returned non-critical errors (expected for accounts without devices/dispatches): %s",
+                            "API returned non-critical errors (expected for accounts without devices): %s",
                             non_critical_errors,
                         )
 

@@ -20,7 +20,6 @@ If you find this useful and are planning on moving to Octopus Energy Germany, wh
   - Heat tariffs (for heat pumps)
 - Device smart control (suspend/unsuspend charging)
 - Electric vehicle charging preferences management
-- Intelligent dispatching status tracking
 
 ## Installation
 
@@ -77,18 +76,6 @@ The integration is configured via the Home Assistant UI:
   - `electricity_balance`: Your current account balance in EUR
   - `timeslots`: (For TimeOfUse tariffs) List of all time slots with their rates and activation times
   - `active_timeslot`: (For TimeOfUse tariffs) Currently active time slot name (e.g., "GO", "STANDARD")
-
-#### Intelligent Dispatching Binary Sensor
-
-- **Entity ID**: `binary_sensor.octopus_<account_number>_intelligent_dispatching`
-- **Description**: Shows whether intelligent dispatching (smart charging) is currently active
-- **State**: `on` when a dispatch is active, `off` otherwise
-- **Attributes**:
-  - `planned_dispatches`: List of upcoming charging sessions
-  - `completed_dispatches`: List of past charging sessions
-  - `devices`: List of connected devices
-  - `current_state`: Current state of your smart charging device
-  - `last_updated`: Timestamp of the last update
 
 ### Switches
 
